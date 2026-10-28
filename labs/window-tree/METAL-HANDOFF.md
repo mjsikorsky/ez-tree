@@ -1,67 +1,75 @@
-# Interface for the native agent
+# Native integration boundary
 
-Keep the Metal conversion moving independently. This lab adds no requirement to
-port its Three.js renderer. `solver.mjs` contains no renderer, DOM, or Three.js
-dependency. Its CPU reference behavior can be ported after the interaction is
-approved. This is a prototype, not a completed native collision implementation.
+Keep the Metal conversion independent. This lab now uses the **actual Pixiv
+spring-bone engine**, replacing the previous custom angular IK dynamics.
 
-## Data boundary
+## Engine
 
-Input at tree creation:
+- `@pixiv/three-vrm-springbone` 3.5.5, MIT.
+- Pinned upstream: `3caf7a21ee68f0d5dfa363ab3d577450bbf60136`.
+- Unmodified source and license: `vendor/three-vrm-springbone/`.
+- Runtime: `vendor/three-vrm-springbone.mjs`.
+- `vendor/PROVENANCE.md` describes the selection and build command.
 
-- Branch section arrays: rest origin xyz, radius, radial segment count.
-- Parent attachment: parent branch ID, segment index, interpolation fraction.
-- Original mesh vertices and normals. Bark uses exact generation ring order;
-  leaves bind as rigid quads to nearest original 3D centerline segments.
+The upstream joint implements world/center-space Verlet inertia, drag, restoring
+motion, length projection, collider correction and quaternion writeback. The
+manager orders dependencies. No custom integration or IK projection remains.
+The solver runs on CPU; no Metal shader rewrite is needed for rendering.
+The JS/Three.js engine itself is not a drop-in native Swift/Metal library. A
+native CPU port or an equivalent native implementation remains separate work.
 
-Per fixed step (1/120 s): receive a foreground window rectangle `{x,y,width,height}`
-in tree-world XY units. Y is up; convert desktop points/DPI and screen origin
-before this boundary. Enumerating native windows, permissions, z-order, multiple
-displays, actual occlusion and tracking are native integration work, not present
-in this lab. One rectangular collider is currently supported.
+## Tree and mesh data
 
-Output: current section positions, local joint angles and angular velocities.
-Meshes use the same segment transforms for bark and leaves. A native GPU path
-can upload transforms and vertex bindings; CPU simulation is sufficient to begin.
+`solver.mjs` builds ordinary Object3D joints from original XYZ section positions.
+Trunk sections are static; other segments are managed Pixiv spring joints.
+Parents are inferred from exact original 3D centerlines and parent-before-child
+generation order. Production generation should emit explicit attachment IDs.
 
-## Reference motion
+Each section exposes `currentWorldMatrix * inverseRestWorldMatrix` in
+`branches[].transforms`. Bark uses known full-detail ring order, and each leaf
+quad binds rigidly to a nearest original segment. Normals use the same rotation.
+These are straightforward native skinning inputs; blend weights can improve
+junction appearance. LOD meshes need corresponding bindings.
 
-1. Apply damped springs to joint deformation angles, targeting zero (rest pose).
-2. Forward-kinematics traversal anchors the trunk and attaches descendants to
-   the interpolated parent segment. Projected segment lengths stay constant.
-3. Bound accumulated deformation within each branch to `maxBend` radians.
-4. Sample branch segments against the moving rectangle and lift contact toward
-   its top using bounded Jacobian angle corrections. Sweep intermediate rectangle
-   positions to reduce missed contact on fast drags (64 sweep cap).
-5. Once the window covers a branch's attachment in X, stop applying collision
-   constraints to that branch. It recovers behind the opaque foreground window.
-6. Skin original bark rings and rigid leaf quads; rotate normals along with them.
+## Window collider and release
 
-Defaults are in `solver.mjs`; the UI initially uses a 35-degree per-branch bend
-limit. The radius increases spring stiffness. All stiffness values are visual
-tuning values, not calibrated wood mechanics.
+Each 1/120 s step receives `{x,y,width,height}` in the current camera's right/up
+plane. A camera frame contains world `origin`, `right`, and `up`. The custom
+`ScreenWindowShape` computes signed distance/normal to the finite rounded-by-
+padding rectangle, extruded in camera depth. The upstream engine applies the
+collision correction and restores bone length. This supports orbit, orthographic
+zoom and pan; projection is no longer tied to world XY or a fixed front camera.
 
-## Known limits to preserve explicitly
+Release is an application policy: once the rectangle covers a branch's **resting**
+attachment in camera X, its collider is disabled. A 0.12-world-unit hysteresis
+band prevents edge chatter. Deformed attachment positions never drive release.
+After release, the library springs recover behind the foreground DOM window.
 
-- Top-edge lifting and attachment release are deliberate desktop animation
-  rules. Hidden branches may intersect the window. Full nonpenetration is not
-  promised, especially at the bend limit or for unreachable contact targets.
-- No branch/branch, leaf/leaf, fracture, torsion, or real 3D window collision.
-- Branch root attachments are inferred from the upstream parent-before-child
-  generation order and exact 3D centerline proximity. The adapter rejects missing
-  attachments. Production generation should emit explicit IDs instead.
-- Bark is skinned by known ring layout, leaves by nearest segment per quad;
-  production leaf generation should emit attachment IDs. Hard segment transforms
-  are a reference; smooth GPU skin weights can improve junction appearance.
-- This lab uses full-detail geometry. LODs need matching bindings.
-- Very large discontinuous window moves beyond the sweep cap can skip contact;
-  they still cannot stretch a branch or bend the anchored trunk.
+Native window bounds, DPI/origin conversion, multiple displays, z-order and
+occlusion remain native app integration work. The current lab has one window.
 
-## Verification contract
+## Parameters and limitations
 
-`solver.test.mjs` covers left/right lifting, fixed trunk, preserved lengths,
-bounded curvature, parent attachments, recovery, trunk-cover release, fast
-sweeps/reversal/resize, deterministic reset/export and timestep validation.
-`Export pose + settings` writes schema `ez-tree-window-lab/v1`. Preserve source
-seed/preset to reproduce the rest mesh. `window.lab` provides browser QA hooks
-for `solver`, `tree`, `moveWindow`, `getRect`, `snapshot`, `setPaused`, `step`, `reset`.
+UI spring strength maps to upstream stiffness `/12`, scaled by base radius.
+Damping is the library's `dragForce` fraction per fixed step (default 0.30).
+Contact padding defaults to 0.06 world units. Gravity is zero. These are visual
+tuning values rather than calibrated wood mechanics.
+
+The upstream implementation checks tail spheres, not swept entire branches.
+No CCD, global coupled rod solution, branch self-collision, hard bend/twist limit,
+or guaranteed nonpenetration is provided. Occluded released branches may overlap
+the rectangle. Changing the camera or teleporting the collider changes contact
+geometry and can legitimately produce a transient response.
+
+Pose export schema `ez-tree-window-lab/v2` records engine, camera frame, window,
+settings, topology, current points and local quaternions. It is an inspection
+snapshot, not a full resumable checkpoint of upstream private Verlet tail state.
+Source seed/preset is included by the UI.
+
+## Validation
+
+Node tests cover actual engine use, full 3D lengths, fixed trunk, attachment
+tracking, finite camera collider, release hysteresis, recovery, settling, reset
+and export. Browser tests reproduce four stationary window placements on all
+three presets, measure per-substep tip motion after settling, and exercise orbit,
+zoom, pan, projected contact and UI controls. See `QA.md`.

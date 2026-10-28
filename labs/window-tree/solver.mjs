@@ -1,158 +1,117 @@
-// Renderer-independent 2.5D reference solver. Coordinates are world units, Y up.
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-export const defaults = { stiffness: 36, damping: 10, maxBend: 0.95, contactIterations: 10, contactMargin: 0.06 };
+import * as THREE from 'three';
+import {VRMSpringBoneJoint,VRMSpringBoneManager,VRMSpringBoneCollider,VRMSpringBoneColliderShape} from './vendor/three-vrm-springbone.mjs';
 
-export function nearestSegment(branches, p, limit = branches.length) {
-  let best = null;
-  for (let b = 0; b < limit; b++) {
-    const nodes = branches[b].rest;
-    for (let s = 0; s < nodes.length - 1; s++) {
-      const a = nodes[s], c = nodes[s + 1];
-      const dx = c.x-a.x, dy = c.y-a.y, dz = (c.z??0)-(a.z??0);
-      const t = clamp(((p.x-a.x)*dx+(p.y-a.y)*dy+((p.z??0)-(a.z??0))*dz)/(dx*dx+dy*dy+dz*dz || 1),0,1);
-      const d = (p.x-a.x-t*dx)**2+(p.y-a.y-t*dy)**2+((p.z??0)-(a.z??0)-t*dz)**2;
-      if (!best || d < best.distance2) best = { branch:b, segment:s, t, distance2:d };
-    }
-  }
-  return best;
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const position=new THREE.Vector3();
+export const defaults={stiffness:36,damping:.30,contactMargin:.06};
+export function nearestSegment(branches,p,limit=branches.length){
+ let best=null;
+ for(let b=0;b<limit;b++)for(let s=0;s<branches[b].rest.length-1;s++){
+  const a=branches[b].rest[s],c=branches[b].rest[s+1],dx=c.x-a.x,dy=c.y-a.y,dz=c.z-a.z;
+  const t=clamp(((p.x-a.x)*dx+(p.y-a.y)*dy+(p.z-a.z)*dz)/(dx*dx+dy*dy+dz*dz||1),0,1);
+  const d=(p.x-a.x-dx*t)**2+(p.y-a.y-dy*t)**2+(p.z-a.z-dz*t)**2;
+  if(!best||d<best.distance2)best={branch:b,segment:s,t,distance2:d};
+ }return best;
 }
 
-export class BranchSolver {
-  constructor(skeleton, options = {}) {
-    this.options = {...defaults, ...options};
-    this.time = 0; this.contacts = []; this.window = null;
-    this.branches = skeleton.branches.map((source, id) => {
-      const rest = source.sections.map(s => ({ x:s.origin.x, y:s.origin.y, z:s.origin.z, radius:s.radius }));
-      const length = [], angle = [];
-      for (let i=0;i<rest.length-1;i++) {
-        length.push(Math.hypot(rest[i+1].x-rest[i].x,rest[i+1].y-rest[i].y));
-        angle.push(Math.atan2(rest[i+1].y-rest[i].y,rest[i+1].x-rest[i].x));
-      }
-      return {id,rest,length,angle,points:rest.map(p=>({...p})),q:new Float64Array(length.length),v:new Float64Array(length.length),parent:null,side:0};
-    });
-    // EZ-Tree emits parents before children. Infer attachments from original 3D
-    // centerlines, never from an already deformed pose or screen-space proximity.
-    for(let i=1;i<this.branches.length;i++) {
-      const parent=nearestSegment(this.branches,this.branches[i].rest[0],i);
-      if (!parent || parent.distance2 > 1e-6) throw Error(`Cannot resolve branch ${i} attachment`);
-      this.branches[i].parent=parent;
-    }
-    this.forward();
-  }
+// Application collider primitive only. Pixiv owns integration, response, length
+// preservation, previous/current-tail state and quaternion updates.
+export class ScreenWindowShape extends VRMSpringBoneColliderShape{
+ constructor(solver,branch){super();this.solver=solver;this.branch=branch;}
+ get type(){return 'screen-window';}
+ calculateCollision(_matrix,object,radius,target){
+  const s=this.solver,w=s.window,b=this.branch;
+  if(!w||b.released)return 1;
+  const p=s.project(object),padding=s.options.contactMargin+radius;
+  // Signed distance to a rectangle, extruded along the camera's depth axis.
+  const cx=w.x+w.width/2,cy=w.y+w.height/2;
+  const dx=p.x-cx,dy=p.y-cy,ex=Math.abs(dx)-w.width/2,ey=Math.abs(dy)-w.height/2;
+  const ox=Math.max(ex,0),oy=Math.max(ey,0),outside=Math.hypot(ox,oy);
+  const distance=outside+Math.min(Math.max(ex,ey),0)-padding;
+  if(distance>=0)return distance;
+  let nx,ny;
+  if(outside>1e-10){nx=ox/outside*(dx<0?-1:1);ny=oy/outside*(dy<0?-1:1);}
+  else if(ex>ey){nx=dx<0?-1:1;ny=0;}
+  else{nx=0;ny=dy<0?-1:1;}
+  target.copy(s.frame.right).multiplyScalar(nx).addScaledVector(s.frame.up,ny);
+  s.contactCount++;return distance;
+ }
+}
 
-  reset() {
-    for(const b of this.branches) { b.q.fill(0); b.v.fill(0); b.side=0; }
-    this.time=0;this.contacts=[];this.window=null;this.forward();
+export class BranchSolver{
+ constructor(skeleton,options={}){
+  this.engine='@pixiv/three-vrm-springbone@3.5.5';
+  this.options={...defaults,...options};this.time=0;this.window=null;this.contactCount=0;this.releaseTransitions=0;
+  this.frame={origin:new THREE.Vector3(),right:new THREE.Vector3(1,0,0),up:new THREE.Vector3(0,1,0)};
+  this.rig=new THREE.Group();this.manager=new VRMSpringBoneManager();
+  this.branches=skeleton.branches.map((source,id)=>{
+   const rest=source.sections.map(s=>({x:s.origin.x,y:s.origin.y,z:s.origin.z??0,radius:s.radius}));
+   return{id,rest,points:rest.map(p=>({...p})),nodes:rest.map(()=>new THREE.Object3D()),parent:null,joints:[],released:false,releaseInitialized:false,length:rest.slice(1).map((p,i)=>Math.hypot(p.x-rest[i].x,p.y-rest[i].y,p.z-rest[i].z))};
+  });
+  for(const b of this.branches){
+   if(b.id){b.parent=nearestSegment(this.branches,b.rest[0],b.id);if(!b.parent||b.parent.distance2>1e-6)throw Error(`Cannot resolve branch ${b.id} attachment`);}
+   const parent=b.parent?this.branches[b.parent.branch].nodes[b.parent.segment]:this.rig;
+   parent.add(b.nodes[0]);
+   const p=b.parent?this.branches[b.parent.branch].rest[b.parent.segment]:{x:0,y:0,z:0};
+   b.nodes[0].position.set(b.rest[0].x-p.x,b.rest[0].y-p.y,b.rest[0].z-p.z);
+   for(let i=1;i<b.nodes.length;i++){b.nodes[i-1].add(b.nodes[i]);b.nodes[i].position.set(b.rest[i].x-b.rest[i-1].x,b.rest[i].y-b.rest[i-1].y,b.rest[i].z-b.rest[i-1].z);}
   }
-
-  forward() {
-    for(const b of this.branches) this.forwardBranch(b);
+  this.rig.updateMatrixWorld(true);
+  for(const b of this.branches){
+   b.inverseRest=b.nodes.map(n=>n.matrixWorld.clone().invert());b.transforms=b.nodes.map(()=>new THREE.Matrix4());
+   if(!b.parent)continue;
+   b.collider=new VRMSpringBoneCollider(new ScreenWindowShape(this,b));
+   const groups=[{colliders:[b.collider]}];
+   for(let i=0;i<b.nodes.length-1;i++){
+    if(b.length[i]<1e-7)continue;
+    const joint=new VRMSpringBoneJoint(b.nodes[i],b.nodes[i+1],{stiffness:this.options.stiffness/12,dragForce:.08,gravityPower:0,gravityDir:new THREE.Vector3(0,-1,0),hitRadius:Math.min(.14,b.rest[i+1].radius)},groups);
+    this.manager.addJoint(joint);b.joints.push(joint);
+   }
   }
-
-  forwardBranch(b) {
-    if(!b.parent){for(let i=0;i<b.rest.length;i++)Object.assign(b.points[i],b.rest[i]);return;}
-    // Bound accumulated curvature, not just individual joint angles. A chain
-    // cannot curl around repeatedly as more contact samples are solved.
-    let total=0;
-    for(let i=0;i<b.q.length;i++) {const next=clamp(total+b.q[i],-this.options.maxBend,this.options.maxBend);b.q[i]=next-total;total=next;}
-    let inherited=0;
-    if(b.parent) {
-      const a=b.parent, parent=this.branches[a.branch], p=parent.points[a.segment], n=parent.points[a.segment+1];
-      inherited=Math.atan2(n.y-p.y,n.x-p.x)-parent.angle[a.segment];
-      const r=parent.rest[a.segment], rn=parent.rest[a.segment+1];
-      const ox=b.rest[0].x-(r.x+(rn.x-r.x)*a.t), oy=b.rest[0].y-(r.y+(rn.y-r.y)*a.t);
-      b.points[0].x=p.x+(n.x-p.x)*a.t+ox*Math.cos(inherited)-oy*Math.sin(inherited);
-      b.points[0].y=p.y+(n.y-p.y)*a.t+ox*Math.sin(inherited)+oy*Math.cos(inherited);
-    } else { b.points[0].x=b.rest[0].x;b.points[0].y=b.rest[0].y; }
-    let rotation=inherited;
-    for(let i=0;i<b.length.length;i++) {
-      rotation+=b.q[i];
-      const angle=b.angle[i]+rotation;
-      b.points[i+1].x=b.points[i].x+Math.cos(angle)*b.length[i];
-      b.points[i+1].y=b.points[i].y+Math.sin(angle)*b.length[i];
-    }
+  this.manager.setInitState();this.readPose();
+ }
+ project(p){const x=p.x-this.frame.origin.x,y=p.y-this.frame.origin.y,z=p.z-this.frame.origin.z;return{x:x*this.frame.right.x+y*this.frame.right.y+z*this.frame.right.z,y:x*this.frame.up.x+y*this.frame.up.y+z*this.frame.up.z};}
+ setFrame(frame){this.frame.origin.copy(frame.origin);this.frame.right.copy(frame.right);this.frame.up.copy(frame.up);}
+ readPose(){
+  this.rig.updateMatrixWorld(true);
+  for(const b of this.branches)for(let i=0;i<b.nodes.length;i++){
+   position.setFromMatrixPosition(b.nodes[i].matrixWorld);Object.assign(b.points[i],{x:position.x,y:position.y,z:position.z});
+   b.transforms[i].multiplyMatrices(b.nodes[i].matrixWorld,b.inverseRest[i]);
   }
-
-  step(dt, window = null) {
-    if (!(dt>0 && dt<=1/30)) throw Error('Use fixed substeps <= 1/30 second');
-    this.time+=dt; this.contacts=[];
-    const o=this.options, previous=this.window;
-    const travel=window&&previous?Math.max(Math.abs(window.x-previous.x),Math.abs(window.y-previous.y)):0;
-    const sweeps=Math.min(64,Math.max(1,Math.ceil(travel/0.12)));
-    for(const b of this.branches) {
-      if(!b.parent) continue; // Entire primary trunk remains anchored.
-      const radius=b.rest[0].radius;
-      const stiffness=o.stiffness*(1+Math.min(4,radius*3));
-      for(let i=0;i<b.q.length;i++) {
-        b.v[i]=(b.v[i]-stiffness*b.q[i]*dt)*Math.exp(-o.damping*dt);
-        b.q[i]=clamp(b.q[i]+b.v[i]*dt,-o.maxBend,o.maxBend);
-      }
-    }
-    this.forward();
-    if(window) for(let k=1;k<=sweeps;k++) {
-      const t=k/sweeps;
-      const w=previous?{...window,x:previous.x+(window.x-previous.x)*t,y:previous.y+(window.y-previous.y)*t}:window;
-      this.collide(w);
-    }
-    else for(const b of this.branches)b.side=0;
-    this.window=window?{...window}:null;
+ }
+ reset(){
+  this.time=0;this.window=null;this.contactCount=0;this.releaseTransitions=0;
+  for(const b of this.branches){b.released=false;b.releaseInitialized=false;}
+  this.manager.reset();this.readPose();
+ }
+ step(dt,window=null){
+  if(!(dt>0&&dt<=1/30))throw Error('Use fixed substeps <= 1/30 second');
+  this.time+=dt;this.window=window?{...window}:null;this.contactCount=0;
+  for(const b of this.branches){
+   if(!b.parent)continue;
+   if(!window){b.released=false;b.releaseInitialized=false;}
+   else{
+    // Rest attachment + hysteresis: deformation cannot switch its own contact.
+    const root=this.project(b.rest[0]),h=.12;
+    const inside=root.x>window.x+h&&root.x<window.x+window.width-h;
+    const outside=root.x<window.x-h||root.x>window.x+window.width+h;
+    const released=b.released? !outside:inside;
+    if(b.releaseInitialized&&released!==b.released)this.releaseTransitions++;
+    b.released=released;b.releaseInitialized=true;
+   }
+   b.collider.updateWorldMatrix(false,false);
+   const k=this.options.stiffness/12*(1+Math.min(3,b.rest[0].radius*2));
+   for(const joint of b.joints){joint.settings.stiffness=k;joint.settings.dragForce=clamp(this.options.damping,0,1);}
   }
-
-  collide(w) {
-    const o=this.options;
-    for(const b of this.branches) {
-      if(!b.parent)continue;
-      this.forwardBranch(b);
-      const root=b.points[0];
-      // Side is selected from the rest tip, so front/back branches are stable.
-      if(!b.side)b.side=Math.sign(b.rest.at(-1).x-b.rest[0].x)||1;
-      // A foreground window releases this branch once it covers the attachment.
-      // Its hidden rest pose may overlap the rectangle; this is intentional occlusion.
-      const released = root.x>w.x && root.x<w.x+w.width;
-      if(released)continue;
-      for(let iteration=0;iteration<o.contactIterations;iteration++) {
-        let changed=false;
-        for(let s=b.length.length-1;s>=0;s--) {
-          // Sample the entire segment to catch edges passing between its nodes.
-          const samples=Math.max(2,Math.ceil(b.length[s]/0.12));
-          for(let k=1;k<=samples;k++) {
-            const t=k/samples, a=b.points[s], c=b.points[s+1];
-            const x=a.x+(c.x-a.x)*t, y=a.y+(c.y-a.y)*t;
-            const radius=Math.min(0.14,b.rest[s].radius)+o.contactMargin;
-            if(x<w.x-radius||x>w.x+w.width+radius||y<w.y-radius||y>=w.y+w.height+radius)continue;
-            // Lift toward the top; choose an upward rotational direction even
-            // when contact is near a vertical segment (singular Jacobian).
-            const target=w.y+w.height+radius, error=Math.min(0.22,target-y);
-            let denom=0; const gradients=[];
-            for(let j=0;j<=s;j++) {const g=x-b.points[j].x;gradients.push(g);denom+=g*g;}
-            if(denom<1e-8)continue;
-            for(let j=0;j<=s;j++) {
-              b.q[j]=clamp(b.q[j]+clamp(error*gradients[j]/(denom+0.04),-0.065,0.065),-o.maxBend,o.maxBend);
-              b.v[j]*=0.5;
-            }
-            this.forwardBranch(b); changed=true;
-            if(iteration===o.contactIterations-1)this.contacts.push({branch:b.id,x,y,target});
-          }
-        }
-        if(!changed)break;
-      }
-    }
-    // Refresh descendants after their parent's final pose.
-    this.forward();
+  this.manager.update(dt);this.readPose();
+ }
+ metrics(){
+  let lengthError=0,maxDisplacement=0;
+  for(const b of this.branches)for(let i=0;i<b.points.length;i++){
+   const p=b.points[i],r=b.rest[i];maxDisplacement=Math.max(maxDisplacement,Math.hypot(p.x-r.x,p.y-r.y,p.z-r.z));
+   if(i){const a=b.points[i-1];lengthError=Math.max(lengthError,Math.abs(Math.hypot(p.x-a.x,p.y-a.y,p.z-a.z)-b.length[i-1]));}
   }
-
-  metrics() {
-    let lengthError=0,maxAngle=0,maxDisplacement=0;
-    for(const b of this.branches){let accumulated=0;for(let i=0;i<b.length.length;i++) {
-      const a=b.points[i],c=b.points[i+1];
-      lengthError=Math.max(lengthError,Math.abs(Math.hypot(c.x-a.x,c.y-a.y)-b.length[i]));
-      accumulated+=b.q[i];maxAngle=Math.max(maxAngle,Math.abs(accumulated));
-      maxDisplacement=Math.max(maxDisplacement,Math.hypot(c.x-b.rest[i+1].x,c.y-b.rest[i+1].y));
-    }}
-    return {lengthError,maxAngle,maxDisplacement,contacts:this.contacts.length,branches:this.branches.length};
-  }
-
-  snapshot() {
-    return {schema:'ez-tree-window-lab/v1',coordinates:'world units; X right, Y up; Z preserved',time:this.time,options:{...this.options},window:this.window,metrics:this.metrics(),branches:this.branches.map(b=>({id:b.id,parent:b.parent,rest:b.rest,points:b.points,angles:Array.from(b.q),angularVelocity:Array.from(b.v)}))};
-  }
+  return{lengthError,maxDisplacement,contacts:this.contactCount,releaseTransitions:this.releaseTransitions,branches:this.branches.length,joints:this.manager.joints.size};
+ }
+ snapshot(){return{schema:'ez-tree-window-lab/v2',engine:this.engine,coordinates:'3D world units; window in camera right/up coordinates',time:this.time,options:{...this.options},window:this.window,frame:{origin:this.frame.origin.toArray(),right:this.frame.right.toArray(),up:this.frame.up.toArray()},metrics:this.metrics(),branches:this.branches.map(b=>({id:b.id,parent:b.parent,rest:b.rest,points:b.points,released:b.released,quaternions:b.nodes.map(n=>n.quaternion.toArray())}))};}
 }

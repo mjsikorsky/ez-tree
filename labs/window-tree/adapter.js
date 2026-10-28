@@ -29,14 +29,10 @@ export function bindBarkGeometry(geometry, solver, skeleton) {
 export function deformGeometry(binding, solver) {
   const {geometry,original,normals,bindings}=binding, out=geometry.attributes.position.array, normal=geometry.attributes.normal.array;
   for(let k=0;k<bindings.length;k++) {
-    const bind=bindings[k], b=solver.branches[bind.branch],s=bind.segment;
-    const a=b.rest[s],r=b.rest[s+1], p=b.points[s], n=b.points[s+1];
-    const angle=Math.atan2(n.y-p.y,n.x-p.x)-b.angle[s],cos=Math.cos(angle),sin=Math.sin(angle);
-    const cx=a.x+(r.x-a.x)*bind.t,cy=a.y+(r.y-a.y)*bind.t;
-    const x=p.x+(n.x-p.x)*bind.t,y=p.y+(n.y-p.y)*bind.t,i=k*3;
-    const dx=original[i]-cx,dy=original[i+1]-cy;
-    out[i]=x+cos*dx-sin*dy;out[i+1]=y+sin*dx+cos*dy;out[i+2]=original[i+2];
-    normal[i]=cos*normals[i]-sin*normals[i+1];normal[i+1]=sin*normals[i]+cos*normals[i+1];normal[i+2]=normals[i+2];
+    const bind=bindings[k],e=solver.branches[bind.branch].transforms[bind.segment].elements,i=k*3;
+    const x=original[i],y=original[i+1],z=original[i+2],nx=normals[i],ny=normals[i+1],nz=normals[i+2];
+    out[i]=e[0]*x+e[4]*y+e[8]*z+e[12];out[i+1]=e[1]*x+e[5]*y+e[9]*z+e[13];out[i+2]=e[2]*x+e[6]*y+e[10]*z+e[14];
+    normal[i]=e[0]*nx+e[4]*ny+e[8]*nz;normal[i+1]=e[1]*nx+e[5]*ny+e[9]*nz;normal[i+2]=e[2]*nx+e[6]*ny+e[10]*nz;
   }
   geometry.attributes.position.needsUpdate=true;geometry.attributes.normal.needsUpdate=true;
   geometry.computeBoundingSphere();
