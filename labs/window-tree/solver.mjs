@@ -43,7 +43,7 @@ export class BranchSolver{
     const body=this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(a.x*SCALE,a.y*SCALE,a.z*SCALE).setAdditionalMassProperties(.03,{x:delta.x*SCALE/2,y:delta.y*SCALE/2,z:delta.z*SCALE/2},{x:.001,y:.001,z:.001},IDENTITY).setLinearDamping(1).setAngularDamping(2).setCanSleep(false).setCcdEnabled(false));
     const rotation=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),delta.clone().normalize());
     const radius=Math.max(.035,Math.min(.14,(a.radius+c.radius)/2))*SCALE;
-    const desc=RAPIER.ColliderDesc.capsule(Math.max(.0001,len*SCALE/2-radius),radius).setTranslation(delta.x*SCALE/2,delta.y*SCALE/2,delta.z*SCALE/2).setRotation(rotation).setDensity(0).setFriction(.15).setRestitution(0).setCollisionGroups(0x00010002);
+    const desc=RAPIER.ColliderDesc.capsule(Math.max(.0001,len*SCALE/2-radius),radius).setTranslation(delta.x*SCALE/2,delta.y*SCALE/2,delta.z*SCALE/2).setRotation(rotation).setDensity(0).setFriction(.15).setRestitution(0).setCollisionGroups(0x0001001e);
     const collider=this.world.createCollider(desc,body);b.bodies.push(body);b.colliders.push(collider);b.group.colliders.push(collider);
     const parent=pi?b.bodies[pi-1]:(parentBranch.parent?parentBranch.bodies[parentBranch.proxyForSection[b.parent.segment]]:b.group.anchorBody);
     const parentRest=pi?b.rest[b.proxyIndices[pi-1]]:(parentBranch.parent?parentBranch.rest[parentBranch.proxyIndices[parentBranch.proxyForSection[b.parent.segment]]]:{x:0,y:0,z:0});
@@ -55,9 +55,8 @@ export class BranchSolver{
     this.joints.push({joint,branch:b.id,index:i,parent,body,anchor,stiffnessScale:1+Math.min(3,a.radius*2)});
    }
   }
-  this.windowBody=this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0,-100,0));
-  this.windowShape=new RAPIER.Cuboid(.1,.1,5);
-  this.windowCollider=this.world.createCollider(new RAPIER.ColliderDesc(this.windowShape).setCollisionGroups(0x00020001).setEnabled(false).setFriction(.15).setRestitution(0),this.windowBody);
+  this.windows=Array.from({length:4},(_,i)=>{const body=this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0,-100,0));const collider=this.world.createCollider(RAPIER.ColliderDesc.cuboid(.1,.1,5).setCollisionGroups(((2<<i)<<16)|1).setSolverGroups(((2<<i)<<16)|1).setEnabled(false).setFriction(.15).setRestitution(0),body);return{body,collider,ready:false,previous:null};});
+  this.windowBody=this.windows[0].body;this.windowCollider=this.windows[0].collider;
   this.updateMotors();this.readPose();
  }
  updateMotors(){
@@ -84,7 +83,7 @@ export class BranchSolver{
  setState(group,state){
   if(group.state===state)return;
   this.releaseTransitions++;group.state=state;
-  for(const collider of group.colliders)collider.setSolverGroups(state==='ACTIVE'?0xffffffff:0);
+  
  }
  updatePolicy(window,pose,first,resized){
   // Release an entire limb, including its descendants. Rearm only when Rapier
@@ -107,39 +106,39 @@ export class BranchSolver{
    }
   }
  }
- step(dt,window=null){
+ step(dt,input=null){
   if(!(dt>0&&dt<=1/30))throw Error('Use fixed substeps <= 1/30 second');this.updateMotors();
-  const previous=this.window;
-  const resized=window&&previous&&(Math.abs(window.width-previous.width)>1e-6||Math.abs(window.height-previous.height)>1e-6);
-  this.window=window?{...window}:null;
-  const pose=window?this.poseWindow(window):null,first=!!window&&!this.windowReady;
-  if(window){
-   const sizeKey=`${window.width}/${window.height}/${this.options.contactMargin}`;
-   if(sizeKey!==this.windowSizeKey){this.windowCollider.setShape(pose.shape);this.windowSizeKey=sizeKey;}
-   this.windowCollider.setEnabled(true);
-   if(first){this.windowBody.setTranslation(pose.center,true);this.windowBody.setRotation(pose.rotation,true);}
-   this.windowReady=true;
-  }else{this.windowCollider.setEnabled(false);this.windowReady=false;}
-  // Fixed small steps. Kinematic targets interpolate the input trajectory;
-  // Rapier infers collider velocity and owns contact impulse resolution.
-  const startPos=this.windowBody.translation(),startRot=this.windowBody.rotation();
-  const travel=pose?Math.hypot(pose.center.x-startPos.x,pose.center.y-startPos.y,pose.center.z-startPos.z)/SCALE:0;
-  const steps=Math.max(1,Math.round(dt*480),Math.min(64,Math.ceil(travel/.15)));
-  const startScreen=this.project({x:startPos.x/SCALE,y:startPos.y/SCALE,z:startPos.z/SCALE});
-  const q0=new THREE.Quaternion(startRot.x,startRot.y,startRot.z,startRot.w);
+  const rects=Array.isArray(input)?input:input?[input]:[];if(rects.length>4)throw Error('Maximum four windows');this.window=rects[0]??null;this.windowRects=rects;
+  let steps=Math.max(1,Math.round(dt*480));
+  const prepared=this.windows.map((w,i)=>{
+   const rect=rects[i];if(!rect){w.collider.setEnabled(false);w.ready=false;w.previous=null;return null;}
+   const pose=this.poseWindow(rect),first=!w.ready,resized=!!w.previous&&(rect.width!==w.previous.width||rect.height!==w.previous.height);
+   const key=`${rect.width}/${rect.height}/${this.options.contactMargin}`;if(w.key!==key){w.collider.setShape(pose.shape);w.key=key;}
+   w.collider.setEnabled(true);if(first){w.body.setTranslation(pose.center,true);w.body.setRotation(pose.rotation,true);}w.ready=true;w.previous={...rect};
+   const start=w.body.translation(),r=w.body.rotation(),q=new THREE.Quaternion(r.x,r.y,r.z,r.w),screen=this.project({x:start.x/SCALE,y:start.y/SCALE,z:start.z/SCALE});
+   steps=Math.max(steps,Math.min(64,Math.ceil(new THREE.Vector3(start.x,start.y,start.z).distanceTo(pose.center)/SCALE/.15)));
+   return{w,rect,pose,first,resized,start,q,screen};
+  });
   this.world.timestep=dt/steps;
-  for(let i=1;i<=steps;i++){
-   if(pose){const p=new THREE.Vector3(startPos.x,startPos.y,startPos.z).lerp(pose.center,i/steps),q=q0.clone().slerp(pose.rotation,i/steps);const t=i/steps;
-    const subWindow={...window,x:startScreen.x-window.width/2+(window.x+window.width/2-startScreen.x)*t,y:startScreen.y-window.height/2+(window.y+window.height/2-startScreen.y)*t};
-    this.updatePolicy(subWindow,{...pose,center:p,rotation:q},first&&i===1,resized&&i===1);
-    this.windowBody.setNextKinematicTranslation(p);this.windowBody.setNextKinematicRotation(q);
-   }else this.updatePolicy(null,null,false,false);
+  for(let n=1;n<=steps;n++){
+   for(const g of this.groups){g.windowStates??=Array(4).fill('ACTIVE');g.activeMask=0;}
+   prepared.forEach((v,i)=>{
+    if(!v){for(const g of this.groups)g.windowStates[i]='ACTIVE';return;}
+    const {w,rect,pose,start,q,screen,first,resized}=v,t=n/steps,p=new THREE.Vector3(start.x,start.y,start.z).lerp(pose.center,t),rotation=q.clone().slerp(pose.rotation,t);
+    const sub={...rect,x:screen.x-rect.width/2+(rect.x+rect.width/2-screen.x)*t,y:screen.y-rect.height/2+(rect.y+rect.height/2-screen.y)*t};
+    for(const g of this.groups)g.state=g.windowStates[i];
+    this.updatePolicy(sub,{...pose,center:p,rotation},first&&n===1,resized&&n===1);
+    for(const g of this.groups){g.windowStates[i]=g.state;if(g.state==='ACTIVE')g.activeMask|=2<<i;}
+    w.body.setNextKinematicTranslation(p);w.body.setNextKinematicRotation(rotation);
+   });
+   for(const g of this.groups){for(const c of g.colliders)c.setSolverGroups((1<<16)|g.activeMask);g.state=g.windowStates.includes('OCCLUDED')?'OCCLUDED':g.windowStates.includes('WAIT_CLEAR')?'WAIT_CLEAR':'ACTIVE';}
    this.world.step();
   }
   this.time+=dt;this.contactCount=0;
-  if(window){const pairs=[];this.world.contactPairsWith(this.windowCollider,c=>pairs.push(c));for(const c of pairs)this.world.contactPair(this.windowCollider,c,m=>{this.contactCount+=m.numSolverContacts();});}
+  for(const v of prepared)if(v){const pairs=[];this.world.contactPairsWith(v.w.collider,c=>pairs.push(c));for(const c of pairs)this.world.contactPair(v.w.collider,c,m=>{this.contactCount+=m.numSolverContacts();});}
   this.readPose();
  }
+
  readPose(){
   const q=new THREE.Quaternion(),p=new THREE.Vector3(),unit=new THREE.Vector3(1,1,1);
   for(const b of this.branches){
@@ -160,5 +159,5 @@ export class BranchSolver{
   const q=new THREE.Quaternion();for(const j of this.joints){const t=j.parent.translation(),r=j.parent.rotation();q.set(r.x,r.y,r.z,r.w);const anchor=new THREE.Vector3(j.anchor.x,j.anchor.y,j.anchor.z).applyQuaternion(q).add(new THREE.Vector3(t.x,t.y,t.z)),p=j.body.translation();jointError=Math.max(jointError,Math.hypot(anchor.x-p.x,anchor.y-p.y,anchor.z-p.z)/SCALE);}
   return{lengthError,jointError,maxDisplacement,contacts:this.contactCount,releaseTransitions:this.releaseTransitions,reentries:this.reentries,deepReentries:this.deepReentries,branches:this.branches.length,joints:this.joints.length,groups:this.groups.map(g=>({id:g.id,state:g.state}))};
  }
- snapshot(){return{schema:'ez-tree-window-lab/v3',engine:this.engine,physicsScale:SCALE,coordinates:'3D world units; Rapier meters = world units * 0.1',time:this.time,options:{...this.options},window:this.window,frame:Object.fromEntries(Object.entries(this.frame).map(([k,v])=>[k,v.toArray()])),metrics:this.metrics(),activations:this.activationEvents,branches:this.branches.map(b=>({id:b.id,parent:b.parent,rest:b.rest,points:b.points,released:b.released,state:b.group?.state??'FIXED'}))};}
+ snapshot(){return{schema:'ez-tree-window-lab/v3',engine:this.engine,physicsScale:SCALE,coordinates:'3D world units; Rapier meters = world units * 0.1',time:this.time,options:{...this.options},window:this.window,windows:this.windowRects??[],frame:Object.fromEntries(Object.entries(this.frame).map(([k,v])=>[k,v.toArray()])),metrics:this.metrics(),activations:this.activationEvents,branches:this.branches.map(b=>({id:b.id,parent:b.parent,rest:b.rest,points:b.points,released:b.released,state:b.group?.state??'FIXED'}))};}
 }

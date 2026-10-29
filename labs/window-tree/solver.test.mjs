@@ -27,3 +27,13 @@ test('reversal and moving/resizing through center remain finite',()=>{
 test('reset rebuilds native window shape and preserves parameters',()=>{
  const s=new BranchSolver(fixture());const w={x:-5,y:1,width:3,height:2};tick(s,1,w);s.reset();tick(s,1,w);assert.ok(Math.abs(s.windowCollider.shape.halfExtents.x-(.15+.006))<1e-6);assert.equal(s.options.stiffness,36);assert.equal(s.snapshot().schema,'ez-tree-window-lab/v3');assert.throws(()=>s.step(1),/fixed/);s.dispose();
 });
+
+test('four windows use independent contact filters',()=>{
+ const s=new BranchSolver(fixture());
+ s.step(1/120,[{x:-.2,y:1,width:1,height:2},...Array.from({length:3},(_,j)=>({x:8+j*2,y:1,width:1,height:2}))]);
+ assert.equal(s.groups[0].windowStates[0],'OCCLUDED');assert.equal(s.groups[0].windowStates[1],'ACTIVE');
+ assert.equal(s.groups[0].colliders[0].solverGroups()&2,0);assert.equal(s.groups[0].colliders[0].solverGroups()&4,4);
+ for(let i=0;i<300;i++)s.step(1/120,Array.from({length:4},(_,j)=>({x:5-i*.025+j*.7,y:1+j*.1,width:.6,height:1.5})));
+ assert.ok(Number.isFinite(s.metrics().maxDisplacement));assert.ok(s.metrics().jointError<.05);assert.equal(s.snapshot().windows.length,4);
+ s.step(1/120,null);assert.ok(s.windows.every(w=>!w.collider.isEnabled()));s.dispose();
+});

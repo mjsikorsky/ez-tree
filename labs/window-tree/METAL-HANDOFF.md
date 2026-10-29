@@ -21,3 +21,5 @@ ACTIVE limbs collide. OCCLUDED limbs have their attachment covered by the window
 JSON schema `ez-tree-window-lab/v3` includes scale, options, camera frame, rectangle, rest/current points, release states and native anchor metrics. Activation clearance null in JSON means Infinity in memory: no native contact within the query margin. The export is a pose/debug record, not a resumable Rapier checkpoint.
 
 Simulation is CPU/WASM and rendering is Three/WebGL. Real macOS window tracking and Rapier native integration are separate work. Reduced capsules may overlap visible leaves/bark; fast reversals can still cause strong physical motion and finite native anchor error. Dynamic CCD, branch fracture and branch self-collision are not enabled.
+
+Four-window stress mode: four independent kinematic cuboids, per-window limb release states, and native solver-group bitmasks preserve contacts with other windows. Drag/resize each panel or use Sweep all four for opposing trajectories. Pose exports include all four rectangles.

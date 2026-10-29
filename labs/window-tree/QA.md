@@ -29,3 +29,5 @@ accuracy. The reduced two-link proxies and native impulse-joint tolerances remai
 visible limitations. CPU cost depends on preset and hardware.
 
 Current spherical candidate: six solver tests and all 12 browser crossing cases passed, with maximum anchor error 0.0006011433 world units. All 16 control checks passed.
+
+Four-window update adds a seventh solver test for independent solver masks, simultaneous moving contacts, export and removal. Browser coverage adds opposing four-window movement with resizing and independent pointer dragging of each added window. The offline Sweep all four button moves all four panels without page errors.

@@ -8,7 +8,7 @@
           "mode": "left-right",
           "maxStep": 0.6396942279699159,
           "maxAnchor": 0.000027396873900058604,
-          "maxDisplacement": 27.62660848108152,
+          "maxDisplacement": 27.429752941639062,
           "reentries": 5,
           "deepReentries": 0
         },
@@ -45,7 +45,7 @@
           "mode": "left-right",
           "maxStep": 1.0435664503326076,
           "maxAnchor": 0.00015998759834733565,
-          "maxDisplacement": 37.07136807416601,
+          "maxDisplacement": 35.1358914388056,
           "reentries": 9,
           "deepReentries": 0
         },
@@ -130,5 +130,10 @@
     "fast sweeps and reversal",
     "390px layout"
   ],
+  "multiWindow": {
+    "maxAnchor": 0.000474317341287599,
+    "windows": 4,
+    "finite": true
+  },
   "pageErrors": []
 }

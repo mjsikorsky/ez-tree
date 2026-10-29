@@ -10,6 +10,11 @@ const evidence={engine:'@dimforge/rapier3d-compat@0.21.0',crossings:[],controls:
 try{
  const page=await browser.newPage({viewport:{width:1320,height:900}}),errors=[];
  page.on('pageerror',e=>errors.push(e.message));await page.goto('http://127.0.0.1:8172');await page.waitForFunction(()=>!!window.lab);if(process.env.TEST_MODE)await page.evaluate(m=>window.testMode=m,process.env.TEST_MODE);
+ assert.equal(await page.locator('.test-window').count(),4);
+ const multi=await page.evaluate(()=>{const l=window.lab;l.setPaused(true);l.reset();let maxAnchor=0;for(let t=0;t<240;t++){for(let j=0;j<4;j++)l.moveWindowAt(j,100+(j%2?240-t:t)*2,180+j*100,170+(t%40),140);l.step();maxAnchor=Math.max(maxAnchor,l.solver.metrics().jointError);}return{maxAnchor,windows:l.snapshot().windows.length,finite:Number.isFinite(l.solver.metrics().maxDisplacement)};});
+ assert.equal(multi.windows,4);assert.ok(multi.finite);assert.ok(multi.maxAnchor<.15);evidence.multiWindow=multi;
+ for(let i=1;i<4;i++){const locator=page.locator('#window'+(i+1));await locator.evaluate(e=>e.style.zIndex='4');const r=await locator.boundingBox();await page.mouse.move(r.x+80,r.y+15);await page.mouse.down();await page.mouse.move(r.x+100,r.y+25);await page.mouse.up();assert.ok(Math.abs((await locator.boundingBox()).x-r.x-20)<2);await locator.evaluate(e=>e.style.zIndex='1');}
+ await page.evaluate(()=>{for(let i=1;i<4;i++)window.lab.moveWindowAt(i,-140,70+i*110,150,100);});
  for(const preset of (process.env.TEST_PRESET?[process.env.TEST_PRESET]:['Oak Small','Ash Small','Pine Small'])){
   await page.selectOption('#preset',preset);
   const cases=await page.evaluate(()=>{

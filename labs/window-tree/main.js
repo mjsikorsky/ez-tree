@@ -5,6 +5,10 @@ import {BranchSolver,initRapier} from './solver.mjs';
 import {bindGeometry,bindBarkGeometry,deformGeometry} from './adapter.js';
 
 const $=id=>document.getElementById(id),stage=$('stage'),viewport=$('viewport'),win=$('window');
+const wins=[win];win.classList.add('test-window');win.querySelector('#resize').classList.add('resize-handle');
+for(let i=1;i<4;i++){const copy=win.cloneNode(true);copy.id='window'+(i+1);copy.querySelector('.resize-handle').id='resize'+(i+1);copy.querySelector('.titlebar span:nth-child(2)').textContent='Test window '+(i+1);copy.setAttribute('aria-label','Draggable test window '+(i+1));stage.append(copy);wins.push(copy);}
+const setWindow=(...args)=>placeWindow(...args);
+const worldRects=()=>wins.map(w=>worldRect(w));
 const scene=new THREE.Scene(),camera=new THREE.OrthographicCamera(-10,10,15,-2,0.1,500);
 camera.position.z=100;
 const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
@@ -34,8 +38,9 @@ function setup(){
   spines=new THREE.LineSegments(ghost.geometry.clone(),new THREE.LineBasicMaterial({color:0xd0a451,depthTest:false}));spines.renderOrder=10;scene.add(ghost,spines);
   ghost.visible=$('ghost').checked;spines.visible=$('skeleton').checked;
   fit();setWindow(24,Math.max(140,stage.clientHeight*.42),Math.min(280,stage.clientWidth*.42),205);
+  wins.slice(1).forEach((w,i)=>setWindow(stage.clientWidth-210,100+i*210,190,160,w));
   accumulator=0;sweep=null;
-  window.lab={solver,tree,camera,controls,getRect:worldRect,moveWindow:setWindow,snapshot:()=>solver.snapshot(),setPaused:v=>paused=v,step:(n=1)=>{for(let i=0;i<n;i++)solver.step(1/120,worldRect());updateMesh();},reset:()=>solver.reset(),frontView:()=>fit(true)};
+  window.lab={solver,tree,camera,controls,getRect:worldRect,moveWindow:setWindow,moveWindowAt:(i,x,y,w,h)=>setWindow(x,y,w??wins[i].offsetWidth,h??wins[i].offsetHeight,wins[i]),getRects:worldRects,snapshot:()=>solver.snapshot(),setPaused:v=>paused=v,step:(n=1)=>{for(let i=0;i<n;i++)solver.step(1/120,worldRects());updateMesh();},reset:()=>solver.reset(),frontView:()=>fit(true)};
 }
 function fit(reset=true){
   const width=stage.clientWidth,height=stage.clientHeight;renderer.setSize(width,height);
@@ -45,37 +50,40 @@ function fit(reset=true){
   if(reset){camera.zoom=1;controls.target.set(cx,cy,0);camera.position.set(cx,cy,100);camera.up.set(0,1,0);}
   camera.updateProjectionMatrix();controls.update();
 }
-function setWindow(x,y,width=win.offsetWidth,height=win.offsetHeight){
+function placeWindow(x,y,width,height,win=wins[0]){
+  width??=win.offsetWidth;height??=win.offsetHeight;
   win.style.width=Math.max(150,Math.min(stage.clientWidth,width))+'px';win.style.height=Math.max(100,Math.min(stage.clientHeight,height))+'px';
   win.style.left=Math.max(-win.offsetWidth+50,Math.min(stage.clientWidth-50,x))+'px';win.style.top=Math.max(65,Math.min(stage.clientHeight-90,y))+'px';
 }
-function worldRect(){
+function worldRect(win=wins[0]){
   frame.origin.copy(controls.target);frame.right.set(1,0,0).applyQuaternion(camera.quaternion);frame.up.set(0,1,0).applyQuaternion(camera.quaternion);solver.setFrame(frame);
   const s=stage.getBoundingClientRect(),r=win.getBoundingClientRect(),sx=(camera.right-camera.left)/camera.zoom/s.width,sy=(camera.top-camera.bottom)/camera.zoom/s.height;
   return {x:camera.left/camera.zoom+(r.left-s.left)*sx,y:camera.top/camera.zoom-(r.bottom-s.top)*sy,width:r.width*sx,height:r.height*sy};
 }
 function updateMesh(){for(const b of bindings)deformGeometry(b,solver);if(spines.visible){const out=spines.geometry.attributes.position.array;let k=0;for(const b of solver.branches)for(let i=0;i<b.points.length-1;i++)for(const p of [b.points[i],b.points[i+1]]){out[k++]=p.x;out[k++]=p.y;out[k++]=p.z;}spines.geometry.attributes.position.needsUpdate=true;}}
-let drag=null;
-win.addEventListener('pointerdown',e=>{sweep=null;win.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,left:win.offsetLeft,top:win.offsetTop,width:win.offsetWidth,height:win.offsetHeight,resize:e.target.id==='resize'};win.focus();});
+for(const win of wins){let drag=null;
+const setWindow=(x,y,w=win.offsetWidth,h=win.offsetHeight)=>placeWindow(x,y,w,h,win);
+win.addEventListener('pointerdown',e=>{sweep=null;wins.forEach(w=>w.style.zIndex=w===win?'2':'1');win.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,left:win.offsetLeft,top:win.offsetTop,width:win.offsetWidth,height:win.offsetHeight,resize:e.target.classList.contains('resize-handle')};win.focus();});
 win.addEventListener('pointermove',e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(drag.resize)setWindow(drag.left,drag.top,drag.width+dx,drag.height+dy);else setWindow(drag.left+dx,drag.top+dy);});
 for(const event of ['pointerup','pointercancel','lostpointercapture'])win.addEventListener(event,()=>drag=null);
 win.addEventListener('keydown',e=>{const moves={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};if(!moves[e.key])return;e.preventDefault();sweep=null;const [x,y]=moves[e.key],step=e.shiftKey?30:8;setWindow(win.offsetLeft+x*step,win.offsetTop+y*step);});
+}
 $('stiffness').addEventListener('input',()=>{solver.options.stiffness=+$('stiffness').value;$('stiffnessValue').value=$('stiffness').value;});
 $('damping').addEventListener('input',()=>{solver.options.damping=+$('damping').value;$('dampingValue').value=solver.options.damping;});
 $('padding').addEventListener('input',()=>{solver.options.contactMargin=+$('padding').value/100;$('paddingValue').value=(+$('padding').value/100).toFixed(2);});
 $('front').onclick=()=>fit(true);
 for(const [id,factor] of [['zoomIn',1.25],['zoomOut',.8]])$(id).onclick=()=>{camera.zoom=THREE.MathUtils.clamp(camera.zoom*factor,.25,8);camera.updateProjectionMatrix();};
 $('preset').addEventListener('change',setup);$('reset').onclick=setup;
-$('skeleton').onchange=()=>spines.visible=$('skeleton').checked;$('ghost').onchange=()=>ghost.visible=$('ghost').checked;$('transparent').onchange=()=>win.classList.toggle('inspect',$('transparent').checked);
+$('skeleton').onchange=()=>spines.visible=$('skeleton').checked;$('ghost').onchange=()=>ghost.visible=$('ghost').checked;$('transparent').onchange=()=>wins.forEach(w=>w.classList.toggle('inspect',$('transparent').checked));
 $('sweep').onclick=()=>{solver.reset();sweep={start:performance.now(),from:-win.offsetWidth+55,to:stage.clientWidth-55};};
 $('export').onclick=()=>{const pose=solver.snapshot();pose.source={repository:'dgreenheck/ez-tree',commit:'dcf309bd86bd521083d9c70f01f2de45fdc7c457',preset:$('preset').value,seed};const blob=new Blob([JSON.stringify(pose,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='ez-tree-window-pose.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),5000);};
 new ResizeObserver(()=>{if(box)fit(false);}).observe(stage);
 function animate(now){requestAnimationFrame(animate);if(!solver)return;
-  if(sweep){const t=Math.min(1,(now-sweep.start)/6500);setWindow(sweep.from+(sweep.to-sweep.from)*t,stage.clientHeight*.42);if(t===1)sweep=null;}
+  if(sweep){const t=Math.min(1,(now-sweep.start)/6500);wins.forEach((w,i)=>{const u=i%2?1-t:t;placeWindow(sweep.from+(sweep.to-sweep.from)*u,140+i*125,w.offsetWidth,w.offsetHeight,w);});if(t===1)sweep=null;}
   accumulator=Math.min(accumulator+(now-previous)/1000,8/120);previous=now;
-  const start=performance.now();if(!paused){while(accumulator>=1/120){solver.step(1/120,worldRect());accumulator-=1/120;}updateMesh();}else accumulator=0;
+  const start=performance.now();if(!paused){while(accumulator>=1/120){solver.step(1/120,worldRects());accumulator-=1/120;}updateMesh();}else accumulator=0;
   lastCost=lastCost*.9+(performance.now()-start)*.1;
   renderer.render(scene,camera);
-  const m=solver.metrics();$('stats').textContent=`RAPIER · ${m.joints} joints · ${lastCost.toFixed(1)} ms CPU/frame · anchor error ${m.jointError.toFixed(4)}`;
+  const m=solver.metrics();$('stats').textContent=`RAPIER · 4 windows · ${m.joints} joints · ${lastCost.toFixed(1)} ms CPU/frame · anchor error ${m.jointError.toFixed(4)}`;
 }
 initRapier().then(()=>{setup();previous=performance.now();requestAnimationFrame(animate);}).catch(error=>{$('error').hidden=false;$('error').textContent=error.stack;console.error(error);});

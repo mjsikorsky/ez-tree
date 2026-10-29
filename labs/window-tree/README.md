@@ -48,3 +48,5 @@ The browser suite requires Playwright/Chromium, or the environment variables `PL
 See `QA.md`, `METAL-HANDOFF.md` and `vendor/PROVENANCE.md`.
 
 Install and run this isolated lab: `cd labs/window-tree && npm ci && npm run dev`. Build the offline HTML with `npm run build`. Rapier 0.21.0 is pinned in package-lock.json.
+
+Four-window stress mode: four independent kinematic cuboids, per-window limb release states, and native solver-group bitmasks preserve contacts with other windows. Drag/resize each panel or use Sweep all four for opposing trajectories. Pose exports include all four rectangles.
