@@ -1,46 +1,31 @@
-# Spring-bone migration verification
+# Verification
 
-Engine: official unmodified `@pixiv/three-vrm-springbone` 3.5.5, pinned revision
-`3caf7a21ee68f0d5dfa363ab3d577450bbf60136`.
+## Automated checks
 
-## Temporal regression
+`node --test labs/window-tree/solver.test.mjs` covers:
+- SHA-256 of the exact Rapier 0.21.0 bundle.
+- Native joint motor API presence, fixed trunk and rest stability.
+- Moving kinematic contact and recovery.
+- Whole-limb release, delayed clearance-based reactivation and no overlapped re-entry.
+- Center reversal/resizing with finite native state and bounded anchor error.
+- Reset collider dimensions, preserved settings, export schema and timestep validation.
 
-The old custom solver, with a stationary window at stage X=230, produced a
-maximum tip jump of 3.034 world units in one 1/120 s step and 123 binary release
-flips in the measured hold interval. The old tests did not check temporal motion.
+`browser.test.mjs` tests real generated Oak Small, Ash Small and Pine Small:
+left-to-right, right-to-left, reversal and changing width through the center.
+It records maximum tip step, displacement and native anchor error; checks all
+reactivations have native clearance >0.003 m; and bounds native anchor error to
+0.15 render units during these tests. See `evidence/browser-evidence.json` for measured results.
 
-The new browser regression covers X=180/230/270/320 on Oak Small (81 branches,
-361 spring joints), Ash Small (56/554), and Pine Small (92/910). Each placement
-uses 1,000 settling steps then measures consecutive XYZ tip movements. Assertions:
+The same suite exercises orbit, wheel zoom, pan, front reset, zoom buttons,
+collision after orbit, independent window dragging, resizing, keyboard control,
+sliders, display toggles, pose export, reset and 390px layout. Page exceptions fail the suite.
 
-- No release transitions with a held window.
-- Maximum measured tip step below 0.001 world units.
-- Full 3D segment-length error below 1e-10 world units.
+## Acceptance limits
 
-An exploratory 1,500-step run measured 0.000003835 world units maximum held tip
-step for Oak X=230, with zero release transitions; the largest held tip step over
-all 12 placements was 0.000009345. Settling is allowed: these are not bounds on
-initial contact transients or high-speed/teleported collider movement.
+These checks establish repeatable native simulation and protected re-entry for
+the tested trajectories. They do not prove zero visual overlap, zero motion
+discontinuity under arbitrary input, exact mesh collision, or real-tree material
+accuracy. The reduced two-link proxies and native impulse-joint tolerances remain
+visible limitations. CPU cost depends on preset and hardware.
 
-The final scripted 1,300-step hold run passed all 12 placements, with maximum
-measured tip step 0.000009458 world units and no held-window release switches.
-All listed browser controls passed. The final offline build also passed orbit,
-zoom and projected-contact checks, with zero page errors or network requests.
-
-## Additional checks
-
-Seven Node test groups exercise actual engine joints, left/right lifting, fixed
-trunk and full 3D lengths, rest-based release/hysteresis, recovery, XYZ attachment
-tracking, camera-oriented finite collider normals, temporal settling and
-deterministic reset/export. Invalid timesteps are rejected.
-
-Browser checks exercise all three presets, background orbit, wheel zoom,
-right-drag pan, front reset and zoom buttons, collision after camera rotation,
-independent window drag, corner resize, keyboard movement, three sliders, three
-diagnostic toggles, pose export, reset, sweep/reversal, and narrow viewport.
-The browser script writes measured results into `dist/browser-evidence.json`.
-
-Production build and offline HTML are verified separately. Browser tests run
-with software WebGL in headless Chromium; their CPU timings do not measure Mac
-or Metal performance. Validation uses available Vite 6.4.5 / Three.js dependencies;
-root package files are unchanged. Native macOS windows and Metal are not tested.
+Current spherical candidate: six solver tests and all 12 browser crossing cases passed, with maximum anchor error 0.0006011433 world units. All 16 control checks passed.

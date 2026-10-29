@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {Tree} from '../../src/lib/tree.js';
-import {BranchSolver} from './solver.mjs';
+import {BranchSolver,initRapier} from './solver.mjs';
 import {bindGeometry,bindBarkGeometry,deformGeometry} from './adapter.js';
 
 const $=id=>document.getElementById(id),stage=$('stage'),viewport=$('viewport'),win=$('window');
@@ -19,14 +19,14 @@ let seed=1042;
 
 function leafMap(){const c=document.createElement('canvas');c.width=c.height=64;const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.beginPath();ctx.ellipse(32,31,18,29,-0.25,0,Math.PI*2);ctx.fill();return new THREE.CanvasTexture(c);}
 const map=leafMap();
-function disposeTree(){if(!tree)return;scene.remove(tree,ghost,spines);for(const b of bindings)b.geometry.dispose();tree.branchesMesh.material.dispose();tree.leavesMesh.material.dispose();ghost.geometry.dispose();ghost.material.dispose();spines.geometry.dispose();spines.material.dispose();}
+function disposeTree(){if(!tree)return;solver?.dispose();scene.remove(tree,ghost,spines);for(const b of bindings)b.geometry.dispose();tree.branchesMesh.material.dispose();tree.leavesMesh.material.dispose();ghost.geometry.dispose();ghost.material.dispose();spines.geometry.dispose();spines.material.dispose();}
 function setup(){
   disposeTree();tree=new Tree();tree.loadPreset($('preset').value);
   tree.options.seed=seed;tree.options.bark.textured=false;tree.options.leaves.map=map;tree.options.leaves.tint=0x718747;
   tree.generate();tree.branchesMesh.material.color.set(0x746149);
   // Contact animation owns the branch transform. Disable leaf-only shader wind.
   tree.leavesMesh.material.onBeforeCompile=()=>{};
-  solver=new BranchSolver(tree.skeleton,{stiffness:+$('stiffness').value,damping:+$('damping').value/100,contactMargin:+$('padding').value/100});
+  solver=new BranchSolver(tree.skeleton,{stiffness:+$('stiffness').value,damping:+$('damping').value,contactMargin:+$('padding').value/100});
   bindings=[bindBarkGeometry(tree.branchesMesh.geometry,solver,tree.skeleton),bindGeometry(tree.leavesMesh.geometry,solver,4)];
   scene.add(tree);box=new THREE.Box3().setFromObject(tree);
   const points=[];for(const b of solver.branches)for(let i=0;i<b.rest.length-1;i++)points.push(b.rest[i].x,b.rest[i].y,b.rest[i].z,b.rest[i+1].x,b.rest[i+1].y,b.rest[i+1].z);
@@ -61,7 +61,7 @@ win.addEventListener('pointermove',e=>{if(!drag)return;const dx=e.clientX-drag.x
 for(const event of ['pointerup','pointercancel','lostpointercapture'])win.addEventListener(event,()=>drag=null);
 win.addEventListener('keydown',e=>{const moves={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};if(!moves[e.key])return;e.preventDefault();sweep=null;const [x,y]=moves[e.key],step=e.shiftKey?30:8;setWindow(win.offsetLeft+x*step,win.offsetTop+y*step);});
 $('stiffness').addEventListener('input',()=>{solver.options.stiffness=+$('stiffness').value;$('stiffnessValue').value=$('stiffness').value;});
-$('damping').addEventListener('input',()=>{solver.options.damping=+$('damping').value/100;$('dampingValue').value=solver.options.damping.toFixed(2);});
+$('damping').addEventListener('input',()=>{solver.options.damping=+$('damping').value;$('dampingValue').value=solver.options.damping;});
 $('padding').addEventListener('input',()=>{solver.options.contactMargin=+$('padding').value/100;$('paddingValue').value=(+$('padding').value/100).toFixed(2);});
 $('front').onclick=()=>fit(true);
 for(const [id,factor] of [['zoomIn',1.25],['zoomOut',.8]])$(id).onclick=()=>{camera.zoom=THREE.MathUtils.clamp(camera.zoom*factor,.25,8);camera.updateProjectionMatrix();};
@@ -76,6 +76,6 @@ function animate(now){requestAnimationFrame(animate);if(!solver)return;
   const start=performance.now();if(!paused){while(accumulator>=1/120){solver.step(1/120,worldRect());accumulator-=1/120;}updateMesh();}else accumulator=0;
   lastCost=lastCost*.9+(performance.now()-start)*.1;
   renderer.render(scene,camera);
-  const m=solver.metrics();$('stats').textContent=`${m.branches} branches · ${m.joints} spring joints · ${lastCost.toFixed(1)} ms CPU/frame · length error ${m.lengthError.toExponential(1)}`;
+  const m=solver.metrics();$('stats').textContent=`RAPIER · ${m.joints} joints · ${lastCost.toFixed(1)} ms CPU/frame · anchor error ${m.jointError.toFixed(4)}`;
 }
-try{setup();requestAnimationFrame(animate);}catch(error){$('error').hidden=false;$('error').textContent=error.stack;throw error;}
+initRapier().then(()=>{setup();previous=performance.now();requestAnimationFrame(animate);}).catch(error=>{$('error').hidden=false;$('error').textContent=error.stack;console.error(error);});

@@ -1,75 +1,23 @@
-# Native integration boundary
+# Metal agent handoff
 
-Keep the Metal conversion independent. This lab now uses the **actual Pixiv
-spring-bone engine**, replacing the previous custom angular IK dynamics.
+All changes are isolated under `labs/window-tree/`; keep the generator/editor/native conversion independent.
 
-## Engine
+## Data boundary
 
-- `@pixiv/three-vrm-springbone` 3.5.5, MIT.
-- Pinned upstream: `3caf7a21ee68f0d5dfa363ab3d577450bbf60136`.
-- Unmodified source and license: `vendor/three-vrm-springbone/`.
-- Runtime: `vendor/three-vrm-springbone.mjs`.
-- `vendor/PROVENANCE.md` describes the selection and build command.
+`BranchSolver(tree.skeleton)` consumes each branch's rest sections: origin {x,y,z}, radius. Parents are resolved against earlier generated branches. Branch 0 is the fixed trunk. Descendants inherit the release group of their top-level limb.
 
-The upstream joint implements world/center-space Verlet inertia, drag, restoring
-motion, length projection, collider correction and quaternion writeback. The
-manager orders dependencies. No custom integration or IK projection remains.
-The solver runs on CPU; no Metal shader rewrite is needed for rendering.
-The JS/Three.js engine itself is not a drop-in native Swift/Metal library. A
-native CPU port or an equivalent native implementation remains separate work.
+`step(1/120, rect)` accepts a rectangle in the current camera right/up plane. `setFrame({origin,right,up})` supplies that plane. Native window targets interpolate through substeps.
 
-## Tree and mesh data
+Each section exposes a THREE.Matrix4 rest-to-current rigid transform in `branches[b].transforms[s]`, plus current `points`. `adapter.js` maps original bark rings and leaf quads to these transforms. A Metal renderer can consume equivalent matrices and original mesh bindings without adopting the browser UI.
 
-`solver.mjs` builds ordinary Object3D joints from original XYZ section positions.
-Trunk sections are static; other segments are managed Pixiv spring joints.
-Parents are inferred from exact original 3D centerlines and parent-before-child
-generation order. Production generation should emit explicit attachment IDs.
+## Native physics
 
-Each section exposes `currentWorldMatrix * inverseRestWorldMatrix` in
-`branches[].transforms`. Bark uses known full-detail ring order, and each leaf
-quad binds rigidly to a nearest original segment. Normals use the same rotation.
-These are straightforward native skinning inputs; blend weights can improve
-junction appearance. LOD meshes need corresponding bindings.
+Rapier 0.21.0, zero gravity, 0.1 m per render unit. At most two capsule links per generated branch; one spherical joint per link, native angular position motors on three axes with force caps. Branch/branch contacts are filtered out. The trunk is fixed; the window is a kinematic cuboid. Normal outer ticks use four 1/480-second native steps; rapid translation adds native steps, capped at 64 per outer tick.
 
-## Window collider and release
+ACTIVE limbs collide. OCCLUDED limbs have their attachment covered by the window plus a 0.5-render-unit early-release margin. WAIT_CLEAR limbs recover without window impulses until every descendant capsule has more than 0.003 m native clearance. Evaluate this policy at each intermediate native target. Never teleport branch links when changing state.
 
-Each 1/120 s step receives `{x,y,width,height}` in the current camera's right/up
-plane. A camera frame contains world `origin`, `right`, and `up`. The custom
-`ScreenWindowShape` computes signed distance/normal to the finite rounded-by-
-padding rectangle, extruded in camera depth. The upstream engine applies the
-collision correction and restores bone length. This supports orbit, orthographic
-zoom and pan; projection is no longer tied to world XY or a fixed front camera.
+## Export and limits
 
-Release is an application policy: once the rectangle covers a branch's **resting**
-attachment in camera X, its collider is disabled. A 0.12-world-unit hysteresis
-band prevents edge chatter. Deformed attachment positions never drive release.
-After release, the library springs recover behind the foreground DOM window.
+JSON schema `ez-tree-window-lab/v3` includes scale, options, camera frame, rectangle, rest/current points, release states and native anchor metrics. Activation clearance null in JSON means Infinity in memory: no native contact within the query margin. The export is a pose/debug record, not a resumable Rapier checkpoint.
 
-Native window bounds, DPI/origin conversion, multiple displays, z-order and
-occlusion remain native app integration work. The current lab has one window.
-
-## Parameters and limitations
-
-UI spring strength maps to upstream stiffness `/12`, scaled by base radius.
-Damping is the library's `dragForce` fraction per fixed step (default 0.30).
-Contact padding defaults to 0.06 world units. Gravity is zero. These are visual
-tuning values rather than calibrated wood mechanics.
-
-The upstream implementation checks tail spheres, not swept entire branches.
-No CCD, global coupled rod solution, branch self-collision, hard bend/twist limit,
-or guaranteed nonpenetration is provided. Occluded released branches may overlap
-the rectangle. Changing the camera or teleporting the collider changes contact
-geometry and can legitimately produce a transient response.
-
-Pose export schema `ez-tree-window-lab/v2` records engine, camera frame, window,
-settings, topology, current points and local quaternions. It is an inspection
-snapshot, not a full resumable checkpoint of upstream private Verlet tail state.
-Source seed/preset is included by the UI.
-
-## Validation
-
-Node tests cover actual engine use, full 3D lengths, fixed trunk, attachment
-tracking, finite camera collider, release hysteresis, recovery, settling, reset
-and export. Browser tests reproduce four stationary window placements on all
-three presets, measure per-substep tip motion after settling, and exercise orbit,
-zoom, pan, projected contact and UI controls. See `QA.md`.
+Simulation is CPU/WASM and rendering is Three/WebGL. Real macOS window tracking and Rapier native integration are separate work. Reduced capsules may overlap visible leaves/bark; fast reversals can still cause strong physical motion and finite native anchor error. Dynamic CCD, branch fracture and branch self-collision are not enabled.

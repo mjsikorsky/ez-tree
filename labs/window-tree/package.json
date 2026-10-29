@@ -1,0 +1,1 @@
+{"name":"ez-tree-window-lab","private":true,"type":"module","scripts":{"dev":"vite --config vite.config.js","build":"vite build --config vite.config.js && node standalone.mjs","test":"node --test solver.test.mjs"},"dependencies":{"@dimforge/rapier3d-compat":"0.21.0","three":"0.174.0"},"devDependencies":{"vite":"6.4.5"}}
