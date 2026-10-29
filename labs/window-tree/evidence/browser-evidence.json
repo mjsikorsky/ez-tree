@@ -1,0 +1,139 @@
+{
+  "engine": "@dimforge/rapier3d-compat@0.21.0",
+  "crossings": [
+    {
+      "preset": "Oak Small",
+      "cases": [
+        {
+          "mode": "left-right",
+          "maxStep": 0.6396942279699159,
+          "maxAnchor": 0.000027396873900058604,
+          "maxDisplacement": 27.429752941639062,
+          "reentries": 5,
+          "deepReentries": 0
+        },
+        {
+          "mode": "right-left",
+          "maxStep": 0.5275073564356024,
+          "maxAnchor": 0.000014126056289030723,
+          "maxDisplacement": 18.238841026898605,
+          "reentries": 5,
+          "deepReentries": 0
+        },
+        {
+          "mode": "reverse-center",
+          "maxStep": 1.1040365780745243,
+          "maxAnchor": 0.0002052693347998498,
+          "maxDisplacement": 33.76757225221248,
+          "reentries": 10,
+          "deepReentries": 0
+        },
+        {
+          "mode": "resize-center",
+          "maxStep": 0.2672558505791212,
+          "maxAnchor": 0.0005682471144552837,
+          "maxDisplacement": 2.063947591406395,
+          "reentries": 5,
+          "deepReentries": 0
+        }
+      ]
+    },
+    {
+      "preset": "Ash Small",
+      "cases": [
+        {
+          "mode": "left-right",
+          "maxStep": 1.0435664503326076,
+          "maxAnchor": 0.00015998759834733565,
+          "maxDisplacement": 35.1358914388056,
+          "reentries": 9,
+          "deepReentries": 0
+        },
+        {
+          "mode": "right-left",
+          "maxStep": 1.0689725008269613,
+          "maxAnchor": 0.0004779932249358161,
+          "maxDisplacement": 41.12611351663157,
+          "reentries": 9,
+          "deepReentries": 0
+        },
+        {
+          "mode": "reverse-center",
+          "maxStep": 2.512454760207823,
+          "maxAnchor": 0.0006011432200588369,
+          "maxDisplacement": 45.59350032980296,
+          "reentries": 18,
+          "deepReentries": 0
+        },
+        {
+          "mode": "resize-center",
+          "maxStep": 0.28504885617308123,
+          "maxAnchor": 0.000038419836783208486,
+          "maxDisplacement": 5.742496773674165,
+          "reentries": 12,
+          "deepReentries": 0
+        }
+      ]
+    },
+    {
+      "preset": "Pine Small",
+      "cases": [
+        {
+          "mode": "left-right",
+          "maxStep": 1.2818720766460328,
+          "maxAnchor": 0.00017072586836358643,
+          "maxDisplacement": 10.048487780567408,
+          "reentries": 37,
+          "deepReentries": 0
+        },
+        {
+          "mode": "right-left",
+          "maxStep": 0.7813575873139197,
+          "maxAnchor": 0.00014393054652390758,
+          "maxDisplacement": 5.8075434838041495,
+          "reentries": 37,
+          "deepReentries": 0
+        },
+        {
+          "mode": "reverse-center",
+          "maxStep": 1.24381349637233,
+          "maxAnchor": 0.0002878832251908071,
+          "maxDisplacement": 10.816886988317238,
+          "reentries": 74,
+          "deepReentries": 0
+        },
+        {
+          "mode": "resize-center",
+          "maxStep": 0.44742316890004125,
+          "maxAnchor": 0.0003984175090544231,
+          "maxDisplacement": 1.2009923271616472,
+          "reentries": 39,
+          "deepReentries": 0
+        }
+      ]
+    }
+  ],
+  "controls": [
+    "orbit",
+    "wheel zoom",
+    "right-drag pan",
+    "front view",
+    "zoom buttons",
+    "collision after orbit",
+    "window drag isolation",
+    "resize",
+    "keyboard",
+    "three sliders",
+    "three toggles",
+    "pose export",
+    "reset",
+    "fast sweeps and reversal",
+    "390px layout"
+  ],
+  "multiWindow": {
+    "maxAnchor": 0.000474317341287599,
+    "windows": 4,
+    "finite": true
+  },
+  "pageErrors": []
+}
